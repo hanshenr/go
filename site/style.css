@@ -159,6 +159,17 @@ select, input[type="search"] {
   padding: 7px 9px;
   min-width: 0;
 }
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238f877b' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 11px center;
+  background-size: 10px 6px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select:focus-visible { outline-offset: 1px; }
 input[type="search"] { width: 100%; }
 input[type="checkbox"] { accent-color: var(--ink); }
 
