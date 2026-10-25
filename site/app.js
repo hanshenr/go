@@ -749,7 +749,7 @@
     playFrom: function () {
       var s = this.setup;
       Play.newGame({
-        size: s.size, color: s.toPlay === 2 ? 'W' : 'B', setup: { black: s.black.slice(), white: s.white.slice() },
+        size: s.size, color: s.toPlay === 2 ? 'W' : 'B', handicap: 0, setup: { black: s.black.slice(), white: s.white.slice() },
         toPlay: s.toPlay, title: 'Problem ' + this.p.id
       });
       toast('New game from Problem ' + this.p.id + ' \u2014 you play ' + colorName(s.toPlay));
@@ -924,9 +924,16 @@
     init: function () {
       var self = this;
       this.board = makeBoard($('board-play'), {
-        onPlay: function (i) { self.play(i); },
+        onPlay: function (i) { self.onBoard(i); },
         onMark: function (i) { self.mark(i); }
       });
+      var f = $('new-game');
+      f.handicap.addEventListener('change', function () {
+        var hc = Number(f.handicap.value);
+        if (hc >= 2 && f.komi.value === '6.5') f.komi.value = '0.5';
+        if (hc < 2 && f.komi.value === '0.5') f.komi.value = '6.5';
+      });
+      this.wireReview();
       var saved = ls.get('game', null);
       if (validGame(saved)) this.game = saved;
       $('new-game').addEventListener('submit', function (e) { e.preventDefault(); });
@@ -969,7 +976,7 @@
         var prevId = this.game && this.game.id;
         this.game = g;
         ls.set('game', g);
-        if (g.id !== prevId) this.board.prevBoard = null;
+        if (g.id !== prevId) { this.board.prevBoard = null; this.view = null; }
         this.seatCheck();
         this.render();
       } else if (isUpdate && this.game && this.game !== g && newerGame(this.game, g)) {
@@ -1014,11 +1021,12 @@
       var g = {
         v: (prev ? prev.v : 0) + 1, ts: Date.now(), by: me.id,
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        size: opts.size, komi: opts.komi != null ? opts.komi : 6.5, players: players,
+        size: opts.size, komi: opts.komi != null ? opts.komi : 6.5, handicap: opts.handicap || 0, players: players,
         moves: [], dead: [], accept: {}, undo: null
       };
       if (opts.setup) { g.setup = opts.setup; g.toPlay = opts.toPlay; g.title = opts.title; }
       this.game = g;
+      this.view = null;
       this.board.prevBoard = null;
       ls.set('game', g);
       Room.send({ t: 'game', game: g });
@@ -1027,7 +1035,7 @@
     },
     newFromForm: function () {
       var f = $('new-game');
-      this.newGame({ size: Number(radioValue(f, 'size')), color: f.color.value });
+      this.newGame({ size: Number(radioValue(f, 'size')), color: f.color.value, handicap: Number(f.handicap.value), komi: Number(f.komi.value) });
     },
 
     derive: function () {
@@ -1114,6 +1122,93 @@
       this.commit(function (g) { g.accept = g.accept || {}; g.accept[me.id] = true; });
     },
 
+    // ---- review & explore: local only, never touches the shared record
+    /* view: null (live / final position) or { n, vars, p }: real moves [0, min(p, n)) then
+       variation moves vars[0, p - n). n is where the variation branches off. */
+    view: null,
+    realMoves: function () { return this.game ? this.game.moves.filter(function (m) { return !m.resign; }) : []; },
+    viewMax: function () { var v = this.view; return v.vars.length ? v.n + v.vars.length : this.realMoves().length; },
+    viewPosition: function () {
+      var v = this.view, real = this.realMoves(), st = gameSetupState(this.game), labels = {};
+      var apply = function (m) {
+        if (m.pass) { st = E.pass(st); return -1; }
+        var r = E.play(st, m.x, m.y);
+        if (r.ok) st = r.state;
+        return r.ok ? m.y * st.size + m.x : -1;
+      };
+      for (var k = 0; k < Math.min(v.p, v.n); k++) apply(real[k]);
+      for (var j = 0; j < v.p - v.n; j++) { var i = apply(v.vars[j]); if (i >= 0) labels[i] = String(j + 1); }
+      for (var key in labels) if (!st.board[key]) delete labels[key];
+      return { state: st, labels: labels };
+    },
+    enterReview: function () {
+      var n = this.realMoves().length;
+      this.view = { n: n, vars: [], p: n };
+      return this.view;
+    },
+    goTo: function (p) {
+      if (!this.game) return;
+      var v = this.view || this.enterReview();
+      v.p = Math.max(0, Math.min(this.viewMax(), p));
+      if (!v.vars.length) v.n = this.realMoves().length;
+      // Stepping back onto the live position of an unfinished game simply returns to it.
+      if (!v.vars.length && v.p === v.n && this.d && this.d.phase !== 'done') this.view = null;
+      this.render();
+    },
+    step: function (d) {
+      if (!this.game) return;
+      var v = this.view || this.enterReview();
+      this.goTo(v.p + d);
+    },
+    explore: function (i) {
+      var v = this.view || this.enterReview();
+      var st = this.viewPosition().state, x = i % st.size, y = Math.floor(i / st.size);
+      var r = E.play(st, x, y);
+      if (!r.ok) { toast(illegalText(r.reason)); return; }
+      if (v.p <= v.n) { v.n = v.p; v.vars = []; } else v.vars = v.vars.slice(0, v.p - v.n);
+      v.vars.push({ x: x, y: y });
+      v.p = v.n + v.vars.length;
+      this.render();
+    },
+    resetExplore: function () {
+      var v = this.view;
+      if (!v) return;
+      v.vars = [];
+      v.p = v.n;
+      this.goTo(v.p);
+    },
+    backToGame: function () { this.view = null; this.render(); },
+    onBoard: function (i) {
+      if (this.view || (this.d && this.d.phase === 'done')) this.explore(i);
+      else this.play(i);
+    },
+    wireReview: function () {
+      var self = this;
+      $('rv-first').addEventListener('click', function () { self.goTo(0); });
+      $('rv-prev').addEventListener('click', function () { self.step(-1); });
+      $('rv-next').addEventListener('click', function () { self.step(1); });
+      $('rv-last').addEventListener('click', function () { self.goTo(Infinity); });
+      $('rv-slider').addEventListener('input', function (e) { self.goTo(Number(e.target.value)); });
+      $('rv-reset').addEventListener('click', function () { self.resetExplore(); });
+      $('rv-live').addEventListener('click', function () { self.backToGame(); });
+    },
+    renderReview: function (d) {
+      var total = this.realMoves().length, v = this.view;
+      var p = v ? v.p : total, max = v ? this.viewMax() : total;
+      var exploring = !!(v && v.vars.length);
+      var slider = $('rv-slider');
+      slider.max = String(max);
+      slider.value = String(p);
+      $('rv-first').disabled = $('rv-prev').disabled = p <= 0;
+      $('rv-next').disabled = $('rv-last').disabled = p >= max;
+      var where = $('rv-where');
+      if (exploring && p > v.n) where.textContent = 'Move ' + v.n + ' + ' + (p - v.n) + ' tried';
+      else where.textContent = 'Move ' + p + ' of ' + total;
+      $('rv-explore').hidden = !exploring;
+      $('rv-explore-text').textContent = exploring ? 'from move ' + v.n + ' \u2014 the real game is unchanged.' : '';
+      $('rv-live').hidden = !(v && d.phase !== 'done');
+    },
+
     connText: function () {
       if (Room.state === 'failed') return { text: 'Offline', cls: 'warn' };
       if (Room.state === 'connected' && Room.opponent) return { text: 'Opponent connected — ' + Room.opponent.name, cls: 'ok' };
@@ -1149,23 +1244,44 @@
         $('play-title').textContent = 'Go';
         $('play-meta').textContent = '';
         clear($('play-players'));
+        $('review').hidden = true;
         append(status, 'No game yet. Pick a board size and start one — it appears for both of you.');
         updateYourMove();
         return;
       }
       var d = this.d = this.derive(), st = d.state, my = this.myColor();
-      var scoring = d.phase === 'scoring' || (d.phase === 'done' && !d.resigned);
-      var sc = scoring ? E.score(st, d.dead) : null;
+      if (this.view) {
+        // The record may have shrunk (undo) since review began.
+        var total = this.realMoves().length, v = this.view;
+        if (v.n > total) { v.n = total; v.vars = []; }
+        if (!v.vars.length) v.n = total;
+        v.p = Math.min(v.p, this.viewMax());
+      }
+      var scoring = !this.view && (d.phase === 'scoring' || (d.phase === 'done' && !d.resigned));
+      var sc = scoring || d.phase === 'scoring' || (d.phase === 'done' && !d.resigned) ? E.score(st, d.dead) : null;
       var canMove = this.canMove();
-      this.board.render({
-        board: st.board, size: st.size, lastMove: st.lastMove,
-        mode: canMove ? 'play' : (d.phase === 'scoring' && my ? 'mark' : 'none'),
-        ghostColor: my,
-        isLegal: function (i) { return E.isLegal(st, i % st.size, Math.floor(i / st.size)); },
-        dead: scoring ? d.dead : null, territory: sc ? sc.territory : null
-      });
+      if (this.view) {
+        var vp = this.viewPosition(), vs = vp.state;
+        this.board.render({
+          board: vs.board, size: vs.size, lastMove: vp.labels[vs.lastMove] ? -1 : vs.lastMove, mode: 'play', ghostColor: vs.toPlay,
+          isLegal: function (i) { return E.isLegal(vs, i % vs.size, Math.floor(i / vs.size)); },
+          labels: vp.labels
+        });
+      } else {
+        var explorable = d.phase === 'done';
+        this.board.render({
+          board: st.board, size: st.size, lastMove: st.lastMove,
+          mode: canMove || explorable ? 'play' : (d.phase === 'scoring' && my ? 'mark' : 'none'),
+          ghostColor: explorable ? st.toPlay : my,
+          isLegal: function (i) { return E.isLegal(st, i % st.size, Math.floor(i / st.size)); },
+          dead: scoring ? d.dead : null, territory: scoring ? sc.territory : null
+        });
+      }
+      $('review').hidden = false;
+      this.renderReview(d);
       $('play-title').textContent = g.title || (my ? 'Your game' : 'Current game');
-      $('play-meta').textContent = g.size + '×' + g.size + ' · komi ' + fmtNum(g.komi) + ' · move ' + g.moves.filter(function (m) { return !m.resign; }).length;
+      $('play-meta').textContent = g.size + '×' + g.size + ' · komi ' + fmtNum(g.komi) + (g.handicap >= 2 ? ' · handicap ' + g.handicap : '') +
+        ' · move ' + g.moves.filter(function (m) { return !m.resign; }).length;
       renderPlayers($('play-players'), {
         names: { 1: this.nameOf(1) || 'Waiting…', 2: this.nameOf(2) || 'Waiting…' }, you: my,
         toMove: d.phase === 'play' ? st.toPlay : 0, captures: st.captures,
@@ -1265,7 +1381,11 @@
     var t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if ($('sgf-dialog').open) return;
-    if (activeTab === 'play' && e.key.toLowerCase() === 'p') { Play.pass(); e.preventDefault(); }
+    if (activeTab === 'play') {
+      if (e.key.toLowerCase() === 'p' && !Play.view) { Play.pass(); e.preventDefault(); }
+      else if (e.key === 'ArrowLeft') { Play.step(-1); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { Play.step(1); e.preventDefault(); }
+    }
     else if (activeTab === 'problems') {
       if (e.key === 'ArrowLeft') { Problems.step(-1); e.preventDefault(); }
       else if (e.key === 'ArrowRight') { Problems.step(1); e.preventDefault(); }

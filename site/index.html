@@ -47,6 +47,22 @@
           <div class="controls" id="play-controls"></div>
           <div class="controls secondary" id="play-controls-2"></div>
 
+          <div class="review" id="review" hidden>
+            <div class="rv-nav">
+              <button class="btn icon" id="rv-first" aria-label="First move"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M12 3 7 8l5 5"/></svg></button>
+              <button class="btn icon" id="rv-prev" aria-label="Previous move"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg></button>
+              <span class="rv-where" id="rv-where"></span>
+              <button class="btn icon" id="rv-next" aria-label="Next move"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg></button>
+              <button class="btn icon" id="rv-last" aria-label="Last move"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10M4 3l5 5-5 5"/></svg></button>
+            </div>
+            <input type="range" id="rv-slider" min="0" max="0" value="0" aria-label="Move">
+            <div class="rv-explore" id="rv-explore" hidden>
+              <span><strong>Exploring</strong> <span class="muted" id="rv-explore-text"></span></span>
+              <button class="btn small" id="rv-reset">Reset</button>
+            </div>
+            <button class="btn small primary" id="rv-live" hidden>Back to game</button>
+          </div>
+
           <form id="new-game" class="card new-game" autocomplete="off">
             <div class="field">
               <span class="label">Board</span>
@@ -55,6 +71,23 @@
                 <label><input type="radio" name="size" value="13"><span>13×13</span></label>
                 <label><input type="radio" name="size" value="19" checked><span>19×19</span></label>
               </div>
+            </div>
+            <div class="field-row">
+              <label class="field"><span class="label">Handicap</span>
+                <select name="handicap">
+                  <option value="0" selected>None</option>
+                  <option>2</option><option>3</option><option>4</option><option>5</option>
+                  <option>6</option><option>7</option><option>8</option><option>9</option>
+                </select>
+              </label>
+              <label class="field"><span class="label">Komi</span>
+                <select name="komi">
+                  <option value="0.5">0.5</option>
+                  <option value="5.5">5.5</option>
+                  <option value="6.5" selected>6.5</option>
+                  <option value="7.5">7.5</option>
+                </select>
+              </label>
             </div>
             <div class="new-row">
               <label class="field"><span class="label">You play</span>
@@ -70,7 +103,7 @@
           <label class="name-field"><span class="label">Your name</span>
             <input type="text" id="my-name" maxlength="40" autocomplete="nickname" spellcheck="false">
           </label>
-          <p class="hint muted small">Both of you open this same page and you're connected automatically. Key: <kbd>P</kbd> pass</p>
+          <p class="hint muted small">Both of you open this same page and you're connected automatically. Keys: <kbd>P</kbd> pass, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> review</p>
         </aside>
       </div>
     </section>
