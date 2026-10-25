@@ -39,6 +39,12 @@
         <div class="lobby-intro">
           <h2>Play a friend</h2>
           <p class="muted">Anyone with this page's link can join. Create a game, or join one below.</p>
+          <div class="p2p-bar" id="p2p-bar" hidden>
+            <label class="p2p-name"><span class="label">Your name</span>
+              <input type="text" id="p2p-name" maxlength="40" autocomplete="nickname" spellcheck="false">
+            </label>
+            <p class="conn small" id="p2p-status"></p>
+          </div>
         </div>
 
         <form id="new-online" class="card new-game" autocomplete="off">
@@ -108,6 +114,8 @@
             <p class="muted small" id="online-meta"></p>
           </div>
           <div class="players" id="online-players"></div>
+          <p class="conn small" id="online-conn" hidden></p>
+          <div class="invite" id="online-invite" hidden></div>
           <p class="status" id="online-status" aria-live="polite"></p>
           <div class="request" id="online-request" hidden></div>
           <div class="controls" id="online-controls"></div>
@@ -229,6 +237,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+  <script src="peerjs.min.js"></script>
   <script src="go-engine.js"></script>
   <script src="problems.js"></script>
   <script src="app.js"></script>

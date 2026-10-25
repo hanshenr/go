@@ -996,6 +996,235 @@
     };
   }
 
+
+  // ------------------------------------------------------------------ peer-to-peer store
+  // Same interface as window.superset.storage, synced over PeerJS in a star around a host tab.
+
+  var P2P_SITE = 'https://hanshenr.github.io/go/';
+
+  function p2pIdentity() {
+    var id = ls.get('p2p.id', null);
+    if (!id || !/^[a-z0-9]{8,32}$/.test(id)) {
+      id = (Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8)).replace(/[^a-z0-9]/g, '');
+      ls.set('p2p.id', id);
+    }
+    var name = ls.get('p2p.name', null);
+    if (!name) { name = 'Guest ' + (1000 + Math.floor(Math.random() * 9000)); ls.set('p2p.name', name); }
+    return { userId: id, name: name };
+  }
+
+  function makeP2PStore() {
+    var me = p2pIdentity();
+    var myPeerId = 'go-' + me.userId;
+    var room = PARAMS.get('room');
+    if (room && !/^go-[a-z0-9]{8,32}$/.test(room)) room = null;
+    var isHost = !room || room === myPeerId;
+    var roomId = isHost ? myPeerId : room;
+    var saveKey = 'p2p.room.' + roomId;
+    var data = ls.get(saveKey, {}) || {};
+    var subs = {}, conns = {}, statusFns = [];
+    var info = { role: isHost ? 'host' : 'guest', roomId: roomId, state: isHost ? 'waiting' : 'connecting', peers: [], hostName: '', synced: isHost, everConnected: false };
+    var peer = null, hostConn = null, retryDelay = 1000, retryTimer = 0, saveTimer = 0, dead = false;
+
+    function emitStatus() {
+      info.peers = Object.keys(conns).map(function (k) { return { userId: conns[k].userId, name: conns[k].name }; })
+        .filter(function (x) { return x.userId; });
+      statusFns.slice().forEach(function (fn) { try { fn(info); } catch (e) { /* ignore */ } });
+    }
+    function records(key) {
+      var m = data[key] || {};
+      return Object.keys(m).map(function (k) { return m[k]; }).filter(function (r) { return r && r.value != null; });
+    }
+    function notify(key) {
+      setTimeout(function () {
+        var recs = records(key);
+        (subs[key] || []).slice().forEach(function (cb) { try { cb(recs); } catch (e) { /* ignore */ } });
+      }, 0);
+    }
+    function save() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { ls.set(saveKey, data); }, 250);
+    }
+    function mergeRec(key, rec) {
+      if (typeof key !== 'string' || !rec || typeof rec.userId !== 'string' || typeof rec.updatedAt !== 'number') return false;
+      var m = data[key] = data[key] || {};
+      var cur = m[rec.userId];
+      if (cur && cur.updatedAt >= rec.updatedAt) return false;
+      m[rec.userId] = { userId: rec.userId, name: String(rec.name || 'Guest').slice(0, 40), value: rec.value, updatedAt: rec.updatedAt };
+      return true;
+    }
+    function send(conn, msg) { try { if (conn && conn.open) conn.send(msg); } catch (e) { /* dropped */ } }
+    function broadcast(msg, except) { for (var k in conns) if (k !== except) send(conns[k].conn, msg); }
+    function applyChanges(changed, fromPeer) {
+      if (!changed.length) return;
+      var keys = {};
+      changed.forEach(function (kr) {
+        keys[kr[0]] = 1;
+        if (isHost) broadcast({ t: 'put', key: kr[0], rec: kr[1] }, fromPeer);
+      });
+      save();
+      Object.keys(keys).forEach(notify);
+    }
+    function onData(peerId, msg) {
+      var c = conns[peerId];
+      if (!c || !msg || typeof msg !== 'object') return;
+      c.lastSeen = Date.now();
+      if (msg.t === 'hello') {
+        c.userId = String(msg.userId || '');
+        c.name = String(msg.name || 'Guest').slice(0, 40);
+        if (!isHost) { info.hostName = c.name; info.synced = true; info.state = 'connected'; info.everConnected = true; retryDelay = 1000; }
+        var changed = [], dump = msg.dump || {};
+        for (var key in dump) for (var u in dump[key]) if (mergeRec(key, dump[key][u])) changed.push([key, data[key][u]]);
+        applyChanges(changed, peerId);
+        emitStatus();
+      } else if (msg.t === 'put') {
+        if (mergeRec(msg.key, msg.rec)) applyChanges([[msg.key, data[msg.key][msg.rec.userId]]], peerId);
+      } else if (msg.t === 'name') {
+        c.name = String(msg.name || '').slice(0, 40);
+        emitStatus();
+      }
+    }
+    function attach(conn) {
+      var id = conn.peer, closed = false;
+      var gone = function () {
+        if (closed) return;
+        closed = true;
+        if (conns[id] && conns[id].conn === conn) delete conns[id];
+        if (isHost) info.state = Object.keys(conns).length ? 'connected' : (info.everConnected ? 'lost' : 'waiting');
+        else if (conn === hostConn) { hostConn = null; info.state = info.everConnected ? 'lost' : 'nohost'; scheduleConnect(); }
+        emitStatus();
+      };
+      conn.on('open', function () {
+        conns[id] = { conn: conn, userId: null, name: '', lastSeen: Date.now(), gone: gone };
+        send(conn, { t: 'hello', userId: me.userId, name: me.name, dump: data });
+        if (isHost) { info.state = 'connected'; info.everConnected = true; }
+        emitStatus();
+      });
+      conn.on('data', function (msg) { onData(id, msg); });
+      conn.on('close', gone);
+      conn.on('error', gone);
+    }
+    function connectHost() {
+      retryTimer = 0;
+      if (dead || isHost || !peer || peer.destroyed || hostConn) return;
+      if (peer.disconnected) { try { peer.reconnect(); } catch (e) { /* retry below */ } scheduleConnect(); return; }
+      var c = peer.connect(roomId, { reliable: true });
+      hostConn = c;
+      attach(c);
+      setTimeout(function () {
+        if (hostConn === c && !c.open) { hostConn = null; try { c.close(); } catch (e) { /* ignore */ } info.state = info.everConnected ? 'lost' : 'nohost'; emitStatus(); scheduleConnect(); }
+      }, 12000);
+    }
+    function scheduleConnect() {
+      if (dead || isHost || retryTimer) return;
+      retryTimer = setTimeout(connectHost, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 15000);
+    }
+    // Heartbeat: drop links that went silent so the guest reconnects.
+    setInterval(function () {
+      var now = Date.now();
+      for (var k in conns) {
+        var c = conns[k];
+        send(c.conn, { t: 'ping' });
+        if (now - c.lastSeen > 15000) { try { c.conn.close(); } catch (e) { /* ignore */ } c.gone(); }
+      }
+    }, 4000);
+
+    var ready = new Promise(function (resolve) {
+      var settled = false, attempts = 0;
+      function done(v) { if (!settled) { settled = true; resolve(v); } }
+      // A Content-Security-Policy that blocks the signalling socket means P2P can't work here.
+      document.addEventListener('securitypolicyviolation', function (e) {
+        if (!settled && /peerjs|wss?:/.test(String(e.blockedURI) + ' ' + e.violatedDirective)) { info.blocked = true; done(false); }
+      });
+      setTimeout(function () { done(false); }, 10000);
+      function open() {
+        if (dead) return;
+        attempts++;
+        var p;
+        try { p = new window.Peer(myPeerId, { debug: 0 }); } catch (e) { done(false); return; }
+        peer = p;
+        p.on('open', function () {
+          done(true);
+          if (info.state === 'busy') info.state = isHost ? (Object.keys(conns).length ? 'connected' : 'waiting') : 'connecting';
+          if (!isHost) connectHost();
+          emitStatus();
+        });
+        p.on('connection', function (conn) {
+          if (!isHost) { conn.on('open', function () { conn.close(); }); return; }
+          attach(conn);
+        });
+        p.on('disconnected', function () {
+          setTimeout(function () { try { if (p === peer && p.disconnected && !p.destroyed) p.reconnect(); } catch (e) { /* retry later */ } }, 2000);
+        });
+        p.on('error', function (err) {
+          var type = err && err.type;
+          if (type === 'unavailable-id') {
+            // The id is still held by a previous session (reload) or another tab: retry.
+            done(true);
+            if (attempts >= 3) { info.state = 'busy'; emitStatus(); }
+            try { p.destroy(); } catch (e) { /* ignore */ }
+            setTimeout(open, Math.min(1500 * attempts, 8000));
+          } else if (type === 'peer-unavailable') {
+            if (hostConn && !hostConn.open) { hostConn = null; info.state = info.everConnected ? 'lost' : 'nohost'; emitStatus(); scheduleConnect(); }
+          } else if (type === 'browser-incompatible' || type === 'ssl-unavailable') {
+            done(false);
+          } else if (!settled && (type === 'network' || type === 'server-error' || type === 'socket-error' || type === 'socket-closed')) {
+            done(false);
+          } else if (type === 'network' || type === 'socket-error' || type === 'socket-closed' || type === 'server-error') {
+            setTimeout(function () { try { if (p === peer && p.disconnected && !p.destroyed) p.reconnect(); } catch (e) { /* ignore */ } }, 3000);
+          }
+        });
+      }
+      open();
+    });
+
+    function setMine(key, value) {
+      var cur = data[key] && data[key][me.userId];
+      var rec = { userId: me.userId, name: me.name, value: value, updatedAt: Math.max(Date.now(), cur ? cur.updatedAt + 1 : 0) };
+      (data[key] = data[key] || {})[me.userId] = rec;
+      save();
+      broadcast({ t: 'put', key: key, rec: rec });
+      notify(key);
+    }
+
+    return {
+      ready: ready,
+      viewer: me,
+      writable: true,
+      author: isHost,
+      p2p: info,
+      onStatus: function (fn) { statusFns.push(fn); },
+      inviteLink: function (gameId) {
+        return location.origin + location.pathname + '?room=' + encodeURIComponent(roomId) + (gameId ? '&game=' + encodeURIComponent(gameId) : '');
+      },
+      setName: function (name) {
+        me.name = name;
+        ls.set('p2p.name', name);
+        for (var key in data) {
+          var r = data[key][me.userId];
+          if (r && r.value != null) setMine(key, r.value);
+        }
+        broadcast({ t: 'name', name: name });
+        emitStatus();
+      },
+      destroy: function () { dead = true; try { if (peer) peer.destroy(); } catch (e) { /* ignore */ } },
+      get: function (key) { var r = data[key] && data[key][me.userId]; return Promise.resolve(r ? r.value : null); },
+      getAll: function (key) { return Promise.resolve(records(key)); },
+      set: function (key, value) {
+        var json = JSON.stringify(value);
+        if (json.length > 65536) { var e = new Error('too big'); e.code = 'invalid'; return Promise.reject(e); }
+        setMine(key, JSON.parse(json));
+        return Promise.resolve();
+      },
+      remove: function (key) { setMine(key, null); return Promise.resolve(); },
+      subscribe: function (key, cb) {
+        (subs[key] = subs[key] || []).push(cb);
+        return function () { subs[key] = (subs[key] || []).filter(function (f) { return f !== cb; }); };
+      }
+    };
+  }
+
   var Net = {
     store: null, ok: false, revoked: false, reason: '', me: null,
     cache: {},       // key -> records from server
@@ -1008,17 +1237,31 @@
     init: function () {
       var self = this;
       var mock = PARAMS.get('mockstore');
-      var store = mock ? makeMockStore(mock.replace(/[^a-z0-9_-]/gi, '').slice(0, 20) || 'guest') : (window.superset && window.superset.storage);
-      if (!store) { this.reason = 'absent'; return Promise.resolve(false); }
-      return Promise.resolve(store.ready).then(function (ready) {
-        if (!ready) { self.reason = 'notready'; return false; }
+      var ss = mock ? makeMockStore(mock.replace(/[^a-z0-9_-]/gi, '').slice(0, 20) || 'guest') : (window.superset && window.superset.storage);
+      var first = ss ? Promise.resolve(ss.ready).then(function (r) { return r ? ss : null; }, function () { return null; }) : Promise.resolve(null);
+      return first.then(function (store) {
+        if (store || mock) return store;
+        self.reason = ss ? 'notready' : 'absent';
+        // Superset pages forbid outbound connections; fall back to peer-to-peer everywhere else.
+        var onSuperset = !!window.superset || /supersetusercontent\.com$/.test(location.hostname);
+        if (onSuperset || !window.Peer || PARAMS.has('nop2p')) return null;
+        var p2p = makeP2PStore();
+        return p2p.ready.then(function (ok) {
+          if (ok) return p2p;
+          p2p.destroy();
+          self.reason = p2p.p2p.blocked ? 'p2p-blocked' : 'p2p-unreachable';
+          return null;
+        });
+      }).then(function (store) {
+        if (!store) return false;
         self.store = store;
+        self.p2p = store.p2p || null;
         self.me = store.viewer || null;
         if (!self.me || !self.me.userId) { self.reason = 'noviewer'; return false; }
         self.writable = store.writable !== false;
         self.ok = true;
         return true;
-      }, function () { self.reason = 'notready'; return false; });
+      }, function () { self.reason = self.reason || 'notready'; return false; });
     },
 
     call: function (fn) {
@@ -1171,6 +1414,35 @@
 
   var STATUS_RANK = { open: 0, playing: 1, done: 2 };
 
+  function connInfo() {
+    var p = Net.p2p;
+    if (!p) return { text: '', cls: '' };
+    var names = p.peers.map(function (x) { return x.name; }).filter(Boolean);
+    if (p.state === 'busy') return { text: 'This game room is already open in another tab of this browser.', cls: 'warn' };
+    if (p.role === 'host') {
+      if (names.length) return { text: 'Connected to ' + names.join(', '), cls: 'ok' };
+      if (p.state === 'lost') return { text: 'Opponent disconnected \u2014 waiting for them to reconnect\u2026', cls: 'warn' };
+      return { text: 'Waiting for opponent\u2026 Keep this tab open.', cls: '' };
+    }
+    if (p.state === 'connected') return { text: 'Connected to ' + (p.hostName || 'host'), cls: 'ok' };
+    if (p.state === 'lost') return { text: 'Opponent disconnected \u2014 reconnecting\u2026', cls: 'warn' };
+    if (p.state === 'nohost') return { text: 'Can\u2019t reach the host \u2014 their tab may be closed. Retrying\u2026', cls: 'warn' };
+    return { text: 'Connecting to the host\u2026', cls: 'warn' };
+  }
+
+  function copyText(text, input) {
+    var done = function () { toast('Link copied'); };
+    var fallback = function () {
+      var ta = input || h('textarea', { style: 'position:fixed;opacity:0' });
+      if (!input) { ta.value = text; document.body.appendChild(ta); }
+      ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { toast('Select the link and copy it'); }
+      if (!input) ta.remove();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+    else fallback();
+  }
+
   /* Game slot (key game:<id>), one per participant:
      { color, joinedAt, moves: [{x,y}|{pass}|{resign}], dead, deadAt, scoreAt, acceptScore,
        undoRequest, undoId, undoAccept, undoAcceptId, undoDecline }
@@ -1282,13 +1554,35 @@
       $('online-back').addEventListener('click', function () { self.openLobby(); });
       window.addEventListener('hashchange', function () { self.fromHash(); });
 
+      var wait = $('online-unavailable');
+      wait.hidden = false;
+      append(clear(wait), h('p', { class: 'muted', text: 'Connecting\u2026' }));
       Net.init().then(function (ok) {
         self.started = true;
         if (!ok) { self.render(); return; }
+        if (Net.p2p) self.initP2P();
         Net.watch('lobby', function () { self.onLobby(); });
-        self.fromHash();
+        var pg = PARAMS.get('game');
+        if (pg && /^[\w-]{1,40}$/.test(pg)) {
+          self.autoJoin = pg;
+          self.openGame(pg, true);
+          selectTab('online');
+        } else self.fromHash();
         self.render();
       });
+    },
+    initP2P: function () {
+      var self = this, input = $('p2p-name');
+      $('p2p-bar').hidden = false;
+      input.value = Net.me.name;
+      var commit = function () {
+        var v = input.value.trim().replace(/\s+/g, ' ').slice(0, 40);
+        if (!v) { input.value = Net.me.name; return; }
+        if (v !== Net.me.name) { Net.store.setName(v); self.render(); }
+      };
+      input.addEventListener('change', commit);
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { commit(); input.blur(); } });
+      Net.store.onStatus(function () { self.render(); });
     },
     fromHash: function () {
       var m = /^#game=([\w-]+)/.exec(location.hash);
@@ -1424,7 +1718,12 @@
       this.gameId = null;
       this.game = null;
       this.d = null;
-      if (!fromHash && /^#game=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+      var sp = new URLSearchParams(location.search);
+      if (!fromHash && (/^#game=/.test(location.hash) || sp.has('game'))) {
+        sp.delete('game');
+        var q = sp.toString();
+        history.replaceState(null, '', location.pathname + (q ? '?' + q : ''));
+      }
       this.render();
     },
     openGame: function (id, fromHash) {
@@ -1452,6 +1751,11 @@
       var d = deriveGame(this.game, Net.records(key));
       this.d = d;
       this.reconcile(d);
+      if (this.autoJoin === d.game.id && (!Net.p2p || Net.p2p.synced)) {
+        this.autoJoin = null;
+        var seatOpen = !d.seats.B || !d.seats.W;
+        if (seatOpen && !this.myColor(d) && d.game.owner !== Net.me.userId && Net.writable) { this.join(d.game); return; }
+      }
       this.render();
     },
 
@@ -1609,10 +1913,14 @@
         var why = Net.revoked ? 'Access to shared storage was revoked while this page was open. Reload to reconnect.'
           : Net.reason === 'absent' ? 'Online games are stored in the page’s shared storage, which is only available when this page is opened from its Superset link.'
           : Net.reason === 'noviewer' ? 'Shared storage did not identify you. Sign in to play online.'
+          : Net.reason === 'p2p-blocked' ? 'This copy of the page can\u2019t open direct connections. Sign in to play here, or use the public copy to play without an account.'
+          : Net.reason === 'p2p-unreachable' ? 'Couldn\u2019t reach the connection server for peer-to-peer play. Check your network and reload.'
           : 'Shared storage is not available for this viewer — you may need to sign in to the page’s organization.';
         append(unavailable, [
           h('h2', { text: 'Online play is unavailable here' }),
           h('p', { text: why }),
+          location.hostname === 'hanshenr.github.io' ? null
+            : h('a', { class: 'btn primary', href: P2P_SITE, target: '_blank', rel: 'noopener', text: 'Play online without signing in' }),
           h('p', { text: 'Local games and problems work fully.' }),
           h('div', { class: 'controls' },
             h('button', { class: 'btn', text: 'Play locally', onclick: function () { selectTab('local'); } }),
@@ -1638,8 +1946,15 @@
       var self = this, me = Net.me.userId;
       var games = this.lobbyGames();
       var mine = [], open = [], live = [], done = [];
+      if (Net.p2p) {
+        var ps = $('p2p-status'), ct = connInfo();
+        ps.textContent = ct.text;
+        ps.className = 'conn small ' + ct.cls;
+        if (document.activeElement !== $('p2p-name')) $('p2p-name').value = Net.me.name;
+      }
       var intro = document.querySelector('.lobby-intro .muted');
-      intro.textContent = Net.writable ? 'Anyone with this page\u2019s link can join. Create a game, or join one below.'
+      intro.textContent = Net.p2p ? 'No sign-in needed. Create a game and send the invite link to a friend \u2014 your browser hosts the game, so keep this tab open.'
+        : Net.writable ? 'Anyone with this page\u2019s link can join. Create a game, or join one below.'
         : 'You have read-only access to this page, so you can watch games but not create or join them.';
       games.forEach(function (g) {
         var isMine = g.owner === me || (g.joiner && g.joiner.userId === me);
@@ -1719,7 +2034,10 @@
         $('online-meta').textContent = '';
         clear($('online-players')); clear($('online-controls')); clear($('online-controls-2'));
         $('online-request').hidden = true;
-        $('online-status').textContent = Net.cache.lobby ? 'This game could not be found. It may have been removed.' : '';
+        $('online-invite').hidden = true;
+        this.renderConn();
+        $('online-status').textContent = Net.p2p && !Net.p2p.synced ? 'Connecting to the host\u2026'
+          : Net.cache.lobby ? 'This game could not be found. It may have been removed.' : '';
         return;
       }
       var key = 'game:' + this.game.id;
@@ -1732,6 +2050,8 @@
       }
       var d = this.d = deriveGame(this.game, Net.records(key));
       var g = this.game, st = d.state, my = this.myColor(d);
+      this.renderConn();
+      this.renderInvite(d, my);
       var players = Net.ok && d.seats;
       var seatName = function (c) {
         var s = d.seats[c === 1 ? 'B' : 'W'];
@@ -1764,7 +2084,8 @@
 
       var status = clear($('online-status'));
       if (!d.seats.B || !d.seats.W) {
-        append(status, my ? 'Waiting for an opponent. Anyone who opens this page can join from the lobby.' : 'Waiting for an opponent.');
+        append(status, !my ? 'Waiting for an opponent.' : Net.p2p ? 'Waiting for your opponent to open the link.'
+          : 'Waiting for an opponent. Anyone who opens this page can join from the lobby.');
         if (!my && Net.writable) {
           append(status, [' ', h('button', { class: 'btn small primary', text: 'Take the empty seat', onclick: function () { self.join(g); } })]);
         }
@@ -1819,7 +2140,33 @@
       c2.appendChild(h('button', { class: 'btn ghost small', text: 'Export SGF', onclick: function () {
         exportSGF(st, { black: seatName(1), white: seatName(2), result: resultSGF(d.result), date: today(), gameName: g.title }, 'go-' + g.id);
       } }));
+      if (Net.p2p && $('online-invite').hidden) {
+        c2.appendChild(h('button', { class: 'btn ghost small', text: 'Copy game link', onclick: function () { copyText(Net.store.inviteLink(g.id)); } }));
+      }
       if (!my) c2.appendChild(h('span', { class: 'muted small', text: 'You are watching.' }));
+    },
+    renderConn: function () {
+      var el = $('online-conn');
+      if (!Net.p2p) { el.hidden = true; return; }
+      var ct = connInfo();
+      el.hidden = false;
+      el.textContent = ct.text;
+      el.className = 'conn small ' + ct.cls;
+    },
+    renderInvite: function (d, my) {
+      var box = $('online-invite');
+      var open = !d.seats.B || !d.seats.W;
+      if (!Net.p2p || !open || !my) { box.hidden = true; return; }
+      var link = Net.store.inviteLink(d.game.id);
+      if (!box.hidden && box.getAttribute('data-link') === link) return; // keep selection / focus stable
+      box.hidden = false;
+      box.setAttribute('data-link', link);
+      var input = h('input', { type: 'text', readonly: true, value: link, 'aria-label': 'Invite link', onfocus: function () { input.select(); } });
+      append(clear(box), [
+        h('h3', { text: 'Send this link to your opponent' }),
+        h('div', { class: 'row' }, input, h('button', { class: 'btn primary', text: 'Copy', onclick: function () { copyText(link, input); } })),
+        h('p', { text: 'They open it and take the empty seat \u2014 no sign-in. Keep this tab open: your browser hosts the game.' })
+      ]);
     },
     undoPendingFor: function (d, my) {
       if (!my) return false;
@@ -1911,7 +2258,7 @@
   Local.init();
   Problems.init();
   Online.init();
-  var wantTab = /^#game=/.test(location.hash) ? 'online' : ls.get('tab', 'online');
+  var wantTab = /^#game=/.test(location.hash) || PARAMS.has('game') ? 'online' : ls.get('tab', 'online');
   selectTab(['online', 'local', 'problems'].indexOf(wantTab) >= 0 ? wantTab : 'online');
 
   // Expose a small hook for debugging and tests.

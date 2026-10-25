@@ -430,3 +430,32 @@ input[type="checkbox"] { accent-color: var(--ink); }
   .bv-stone.drop, .bv-shadow.drop, .bv-gone, .status .pulse { animation: none; }
 }
 .btn.armed, .btn.armed:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- peer-to-peer online */
+.p2p-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 20px; margin-top: 14px; }
+.p2p-name { display: flex; flex-direction: column; gap: 6px; }
+.p2p-name input {
+  font: 0.92rem var(--sans); color: var(--ink); background: var(--btn-bg);
+  border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 7px 9px; width: 200px; max-width: 100%;
+}
+.conn { color: var(--muted); display: flex; align-items: center; gap: 8px; margin: 0; }
+.conn::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+.conn.ok::before { background: var(--ok); }
+.conn.warn::before { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.invite {
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.invite h3 { font-size: 1.3rem; }
+.invite .row { display: flex; gap: 8px; }
+.invite input {
+  flex: 1; min-width: 0;
+  font: 0.82rem ui-monospace, Menlo, monospace; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 9px;
+}
+.invite p { font-size: 0.85rem; color: var(--muted); }
+.notice .btn.primary { margin-top: 4px; }
