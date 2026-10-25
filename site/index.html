@@ -18,8 +18,7 @@
       <span class="brand-sub" lang="ja">囲碁</span>
     </div>
     <nav class="tabs" role="tablist" aria-label="Mode">
-      <button role="tab" id="tab-online" data-tab="online" aria-controls="view-online">Online</button>
-      <button role="tab" id="tab-local" data-tab="local" aria-controls="view-local">Local</button>
+      <button role="tab" id="tab-play" data-tab="play" aria-controls="view-play">Play</button>
       <button role="tab" id="tab-problems" data-tab="problems" aria-controls="view-problems">Problems</button>
     </nav>
     <label class="coords-toggle" title="Show coordinates">
@@ -31,145 +30,47 @@
   <div id="banner" class="banner" hidden></div>
 
   <main>
-    <!-- Online -->
-    <section id="view-online" class="view" role="tabpanel" aria-labelledby="tab-online" hidden>
-      <div id="online-unavailable" class="notice" hidden></div>
-
-      <div id="lobby" class="lobby" hidden>
-        <div class="lobby-intro">
-          <h2>Play a friend</h2>
-          <p class="muted">Anyone with this page's link can join. Create a game, or join one below.</p>
-          <div class="p2p-bar" id="p2p-bar" hidden>
-            <label class="p2p-name"><span class="label">Your name</span>
-              <input type="text" id="p2p-name" maxlength="40" autocomplete="nickname" spellcheck="false">
-            </label>
-            <p class="conn small" id="p2p-status"></p>
-          </div>
-        </div>
-
-        <form id="new-online" class="card new-game" autocomplete="off">
-          <h3>New game</h3>
-          <div class="field">
-            <span class="label">Board</span>
-            <div class="seg" data-name="size">
-              <label><input type="radio" name="on-size" value="9"><span>9×9</span></label>
-              <label><input type="radio" name="on-size" value="13"><span>13×13</span></label>
-              <label><input type="radio" name="on-size" value="19" checked><span>19×19</span></label>
-            </div>
-          </div>
-          <div class="field-row">
-            <label class="field"><span class="label">Komi</span>
-              <select name="komi">
-                <option value="0.5">0.5</option>
-                <option value="5.5">5.5</option>
-                <option value="6.5" selected>6.5</option>
-                <option value="7.5">7.5</option>
-              </select>
-            </label>
-            <label class="field"><span class="label">Handicap</span>
-              <select name="handicap">
-                <option value="0" selected>None</option>
-                <option>2</option><option>3</option><option>4</option><option>5</option>
-                <option>6</option><option>7</option><option>8</option><option>9</option>
-              </select>
-            </label>
-            <label class="field"><span class="label">You play</span>
-              <select name="color">
-                <option value="B" selected>Black</option>
-                <option value="W">White</option>
-                <option value="R">Random</option>
-              </select>
-            </label>
-          </div>
-          <div class="from-position" hidden></div>
-          <button type="submit" class="btn primary">Create game</button>
-        </form>
-
-        <div class="lobby-lists">
-          <section class="list-block">
-            <h3>Your games</h3>
-            <ul id="list-mine" class="game-list"></ul>
-          </section>
-          <section class="list-block">
-            <h3>Open games</h3>
-            <ul id="list-open" class="game-list"></ul>
-          </section>
-          <section class="list-block">
-            <h3>Being played</h3>
-            <ul id="list-live" class="game-list"></ul>
-          </section>
-          <section class="list-block">
-            <h3>Recently finished</h3>
-            <ul id="list-done" class="game-list"></ul>
-          </section>
-        </div>
-      </div>
-
-      <div id="online-game" class="play-layout" hidden>
-        <div class="stage"><div class="board-host" id="board-online"></div></div>
-        <aside class="side">
-          <button class="link back" id="online-back">&larr; Lobby</button>
-          <div class="game-head">
-            <h2 id="online-title">Game</h2>
-            <p class="muted small" id="online-meta"></p>
-          </div>
-          <div class="players" id="online-players"></div>
-          <p class="conn small" id="online-conn" hidden></p>
-          <div class="invite" id="online-invite" hidden></div>
-          <p class="status" id="online-status" aria-live="polite"></p>
-          <div class="request" id="online-request" hidden></div>
-          <div class="controls" id="online-controls"></div>
-          <div class="controls secondary" id="online-controls-2"></div>
-        </aside>
-      </div>
-    </section>
-
-    <!-- Local -->
-    <section id="view-local" class="view" role="tabpanel" aria-labelledby="tab-local" hidden>
+    <!-- Play: one shared game between two people -->
+    <section id="view-play" class="view" role="tabpanel" aria-labelledby="tab-play" hidden>
       <div class="play-layout">
-        <div class="stage"><div class="board-host" id="board-local"></div></div>
+        <div class="stage"><div class="board-host" id="board-play"></div></div>
         <aside class="side">
+          <p class="conn small" id="conn"></p>
+          <div class="notice-inline" id="offline" hidden></div>
           <div class="game-head">
-            <h2>Local game</h2>
-            <p class="muted small" id="local-meta"></p>
+            <h2 id="play-title">Go</h2>
+            <p class="muted small" id="play-meta"></p>
           </div>
-          <div class="players" id="local-players"></div>
-          <p class="status" id="local-status" aria-live="polite"></p>
-          <div class="controls" id="local-controls"></div>
-          <div class="controls secondary" id="local-controls-2"></div>
+          <div class="players" id="play-players"></div>
+          <p class="status" id="play-status" aria-live="polite"></p>
+          <div class="request" id="play-request" hidden></div>
+          <div class="controls" id="play-controls"></div>
+          <div class="controls secondary" id="play-controls-2"></div>
 
-          <details class="card new-local" id="new-local-wrap">
-            <summary>New game</summary>
-            <form id="new-local" autocomplete="off">
-              <div class="field">
-                <span class="label">Board</span>
-                <div class="seg">
-                  <label><input type="radio" name="lo-size" value="9"><span>9×9</span></label>
-                  <label><input type="radio" name="lo-size" value="13"><span>13×13</span></label>
-                  <label><input type="radio" name="lo-size" value="19" checked><span>19×19</span></label>
-                </div>
+          <form id="new-game" class="card new-game" autocomplete="off">
+            <div class="field">
+              <span class="label">Board</span>
+              <div class="seg">
+                <label><input type="radio" name="size" value="9"><span>9×9</span></label>
+                <label><input type="radio" name="size" value="13"><span>13×13</span></label>
+                <label><input type="radio" name="size" value="19" checked><span>19×19</span></label>
               </div>
-              <div class="field-row">
-                <label class="field"><span class="label">Komi</span>
-                  <select name="komi">
-                    <option value="0.5">0.5</option>
-                    <option value="5.5">5.5</option>
-                    <option value="6.5" selected>6.5</option>
-                    <option value="7.5">7.5</option>
-                  </select>
-                </label>
-                <label class="field"><span class="label">Handicap</span>
-                  <select name="handicap">
-                    <option value="0" selected>None</option>
-                    <option>2</option><option>3</option><option>4</option><option>5</option>
-                    <option>6</option><option>7</option><option>8</option><option>9</option>
-                  </select>
-                </label>
-              </div>
-              <button type="submit" class="btn primary">Start</button>
-            </form>
-          </details>
-          <p class="hint muted small">Keys: <kbd>P</kbd> pass, <kbd>U</kbd> undo</p>
+            </div>
+            <div class="new-row">
+              <label class="field"><span class="label">You play</span>
+                <select name="color">
+                  <option value="B" selected>Black</option>
+                  <option value="W">White</option>
+                  <option value="R">Random</option>
+                </select>
+              </label>
+              <button type="button" class="btn primary" id="new-game-btn">New game</button>
+            </div>
+          </form>
+          <label class="name-field"><span class="label">Your name</span>
+            <input type="text" id="my-name" maxlength="40" autocomplete="nickname" spellcheck="false">
+          </label>
+          <p class="hint muted small">Both of you open this same page and you're connected automatically. Key: <kbd>P</kbd> pass</p>
         </aside>
       </div>
     </section>
@@ -210,11 +111,7 @@
             <button class="btn" id="p-next">Next &rarr;</button>
           </div>
           <div class="from-here">
-            <span class="label">Play from this position</span>
-            <div class="controls">
-              <button class="btn" id="p-play-local">Locally</button>
-              <button class="btn" id="p-play-online">Online</button>
-            </div>
+            <button class="btn" id="p-play">Play this position online</button>
           </div>
           <p class="muted small source" id="p-source"></p>
           <p class="hint muted small">Keys: <kbd>&larr;</kbd> <kbd>&rarr;</kbd> previous / next</p>
