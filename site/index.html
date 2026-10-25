@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Go</title>
+  <meta name="description" content="Play Go online with a friend, on one device, or work through 300 problems.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <h1>Go</h1>
+      <span class="brand-sub" lang="ja">囲碁</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Mode">
+      <button role="tab" id="tab-online" data-tab="online" aria-controls="view-online">Online</button>
+      <button role="tab" id="tab-local" data-tab="local" aria-controls="view-local">Local</button>
+      <button role="tab" id="tab-problems" data-tab="problems" aria-controls="view-problems">Problems</button>
+    </nav>
+    <label class="coords-toggle" title="Show coordinates">
+      <input type="checkbox" id="coords-toggle">
+      <span>Coordinates</span>
+    </label>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <!-- Online -->
+    <section id="view-online" class="view" role="tabpanel" aria-labelledby="tab-online" hidden>
+      <div id="online-unavailable" class="notice" hidden></div>
+
+      <div id="lobby" class="lobby" hidden>
+        <div class="lobby-intro">
+          <h2>Play a friend</h2>
+          <p class="muted">Anyone with this page's link can join. Create a game, or join one below.</p>
+        </div>
+
+        <form id="new-online" class="card new-game" autocomplete="off">
+          <h3>New game</h3>
+          <div class="field">
+            <span class="label">Board</span>
+            <div class="seg" data-name="size">
+              <label><input type="radio" name="on-size" value="9"><span>9×9</span></label>
+              <label><input type="radio" name="on-size" value="13"><span>13×13</span></label>
+              <label><input type="radio" name="on-size" value="19" checked><span>19×19</span></label>
+            </div>
+          </div>
+          <div class="field-row">
+            <label class="field"><span class="label">Komi</span>
+              <select name="komi">
+                <option value="0.5">0.5</option>
+                <option value="5.5">5.5</option>
+                <option value="6.5" selected>6.5</option>
+                <option value="7.5">7.5</option>
+              </select>
+            </label>
+            <label class="field"><span class="label">Handicap</span>
+              <select name="handicap">
+                <option value="0" selected>None</option>
+                <option>2</option><option>3</option><option>4</option><option>5</option>
+                <option>6</option><option>7</option><option>8</option><option>9</option>
+              </select>
+            </label>
+            <label class="field"><span class="label">You play</span>
+              <select name="color">
+                <option value="B" selected>Black</option>
+                <option value="W">White</option>
+                <option value="R">Random</option>
+              </select>
+            </label>
+          </div>
+          <div class="from-position" hidden></div>
+          <button type="submit" class="btn primary">Create game</button>
+        </form>
+
+        <div class="lobby-lists">
+          <section class="list-block">
+            <h3>Your games</h3>
+            <ul id="list-mine" class="game-list"></ul>
+          </section>
+          <section class="list-block">
+            <h3>Open games</h3>
+            <ul id="list-open" class="game-list"></ul>
+          </section>
+          <section class="list-block">
+            <h3>Being played</h3>
+            <ul id="list-live" class="game-list"></ul>
+          </section>
+          <section class="list-block">
+            <h3>Recently finished</h3>
+            <ul id="list-done" class="game-list"></ul>
+          </section>
+        </div>
+      </div>
+
+      <div id="online-game" class="play-layout" hidden>
+        <div class="stage"><div class="board-host" id="board-online"></div></div>
+        <aside class="side">
+          <button class="link back" id="online-back">&larr; Lobby</button>
+          <div class="game-head">
+            <h2 id="online-title">Game</h2>
+            <p class="muted small" id="online-meta"></p>
+          </div>
+          <div class="players" id="online-players"></div>
+          <p class="status" id="online-status" aria-live="polite"></p>
+          <div class="request" id="online-request" hidden></div>
+          <div class="controls" id="online-controls"></div>
+          <div class="controls secondary" id="online-controls-2"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Local -->
+    <section id="view-local" class="view" role="tabpanel" aria-labelledby="tab-local" hidden>
+      <div class="play-layout">
+        <div class="stage"><div class="board-host" id="board-local"></div></div>
+        <aside class="side">
+          <div class="game-head">
+            <h2>Local game</h2>
+            <p class="muted small" id="local-meta"></p>
+          </div>
+          <div class="players" id="local-players"></div>
+          <p class="status" id="local-status" aria-live="polite"></p>
+          <div class="controls" id="local-controls"></div>
+          <div class="controls secondary" id="local-controls-2"></div>
+
+          <details class="card new-local" id="new-local-wrap">
+            <summary>New game</summary>
+            <form id="new-local" autocomplete="off">
+              <div class="field">
+                <span class="label">Board</span>
+                <div class="seg">
+                  <label><input type="radio" name="lo-size" value="9"><span>9×9</span></label>
+                  <label><input type="radio" name="lo-size" value="13"><span>13×13</span></label>
+                  <label><input type="radio" name="lo-size" value="19" checked><span>19×19</span></label>
+                </div>
+              </div>
+              <div class="field-row">
+                <label class="field"><span class="label">Komi</span>
+                  <select name="komi">
+                    <option value="0.5">0.5</option>
+                    <option value="5.5">5.5</option>
+                    <option value="6.5" selected>6.5</option>
+                    <option value="7.5">7.5</option>
+                  </select>
+                </label>
+                <label class="field"><span class="label">Handicap</span>
+                  <select name="handicap">
+                    <option value="0" selected>None</option>
+                    <option>2</option><option>3</option><option>4</option><option>5</option>
+                    <option>6</option><option>7</option><option>8</option><option>9</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit" class="btn primary">Start</button>
+            </form>
+          </details>
+          <p class="hint muted small">Keys: <kbd>P</kbd> pass, <kbd>U</kbd> undo</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Problems -->
+    <section id="view-problems" class="view" role="tabpanel" aria-labelledby="tab-problems" hidden>
+      <div class="problems-layout">
+        <aside class="plist">
+          <div class="plist-head">
+            <input type="search" id="p-search" placeholder="Search number or title" aria-label="Search problems">
+            <div class="plist-filters">
+              <select id="p-level" aria-label="Level"><option value="">All levels</option></select>
+              <label class="check"><input type="checkbox" id="p-unsolved"> Unsolved</label>
+            </div>
+            <p class="muted small" id="p-count"></p>
+          </div>
+          <ol id="p-list" class="p-list"></ol>
+        </aside>
+        <div class="stage"><div class="board-host" id="board-problem"></div></div>
+        <aside class="side">
+          <div class="game-head">
+            <p class="eyebrow" id="p-eyebrow"></p>
+            <h2 id="p-title">Problems</h2>
+            <p class="prompt" id="p-prompt"></p>
+          </div>
+          <div class="feedback" id="p-feedback" aria-live="polite"></div>
+          <div class="controls" id="p-controls">
+            <button class="btn" id="p-retry">Retry</button>
+            <button class="btn" id="p-solution">Show solution</button>
+          </div>
+          <div class="controls" id="p-steps" hidden>
+            <button class="btn" id="p-step-back">Back</button>
+            <button class="btn primary" id="p-step-fwd">Next move</button>
+            <button class="btn ghost" id="p-step-exit">Done</button>
+          </div>
+          <div class="controls nav">
+            <button class="btn" id="p-prev">&larr; Prev</button>
+            <button class="btn" id="p-next">Next &rarr;</button>
+          </div>
+          <div class="from-here">
+            <span class="label">Play from this position</span>
+            <div class="controls">
+              <button class="btn" id="p-play-local">Locally</button>
+              <button class="btn" id="p-play-online">Online</button>
+            </div>
+          </div>
+          <p class="muted small source" id="p-source"></p>
+          <p class="hint muted small">Keys: <kbd>&larr;</kbd> <kbd>&rarr;</kbd> previous / next</p>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="sgf-dialog" class="sgf-dialog">
+    <form method="dialog">
+      <h3>Game record (SGF)</h3>
+      <textarea id="sgf-text" rows="8" readonly></textarea>
+      <div class="controls">
+        <a class="btn primary" id="sgf-download" download="game.sgf">Download</a>
+        <button type="button" class="btn" id="sgf-copy">Copy</button>
+        <button class="btn ghost" value="close">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="go-engine.js"></script>
+  <script src="problems.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

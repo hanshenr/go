@@ -1,0 +1,144 @@
+{
+ "count": 300,
+ "last_exercise": 325,
+ "skipped": [
+  {
+   "n": 6,
+   "reason": "problem page has several distinct positions"
+  },
+  {
+   "n": 13,
+   "reason": "problem page has several distinct positions"
+  },
+  {
+   "n": 19,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 101,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 103,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 104,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 108,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 110,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 121,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 134,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 168,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 174,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 184,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 187,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 190,
+   "reason": "problem page has several distinct positions"
+  },
+  {
+   "n": 201,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 212,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 227,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 235,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 241,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 249,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 252,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 313,
+   "reason": "solution page missing"
+  },
+  {
+   "n": 320,
+   "reason": "no correct line found"
+  },
+  {
+   "n": 323,
+   "reason": "solution page missing"
+  }
+ ],
+ "fallback_answer": [
+  1,
+  9,
+  17,
+  24,
+  25,
+  30,
+  32,
+  59,
+  64,
+  67,
+  88,
+  94,
+  102,
+  106,
+  114,
+  115,
+  117,
+  118,
+  123,
+  142,
+  144,
+  162,
+  181,
+  200,
+  205,
+  207,
+  217,
+  222,
+  224,
+  234,
+  260,
+  280,
+  293,
+  307,
+  308,
+  321
+ ]
+}
