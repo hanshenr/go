@@ -141,6 +141,29 @@ kbd {
   .card .lede { display: none; }
   .cause { font-size: 38px; }
 }
+/* On-screen buttons for touch screens, shown only while running. */
+.pads {
+  position: absolute; z-index: 3; left: 0; right: 0;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: space-between; align-items: flex-end;
+  pointer-events: none;
+}
+.pad-group { display: flex; align-items: flex-end; gap: 10px; }
+.pad {
+  appearance: none; pointer-events: auto; touch-action: none;
+  width: 62px; height: 62px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; color: var(--paper);
+  background: rgba(11, 42, 91, 0.4); border: 2px solid var(--glass-line);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  transition: transform 0.06s ease, background-color 0.06s ease;
+}
+.pad svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+.pad.on { transform: scale(0.9); background: rgba(255, 255, 255, 0.35); }
+.pad.jump { width: 78px; height: 78px; color: var(--ink); background: var(--banana); border-color: var(--ink); box-shadow: 0 4px 0 var(--ink); }
+.pad.jump.on { background: #ffe680; box-shadow: 0 1px 0 var(--ink); }
+
 @media (prefers-reduced-motion: reduce) {
   .now.flash { animation: none; }
   .go { transition: none; }
@@ -175,9 +198,9 @@ kbd {
       <h1 class="logo" id="logo">Monkey <span>Dash</span></h1>
       <p class="lede">Jump the stones, duck the arrows and grab the bananas. Keep an eye on the sky: apes and lava fall from up there.</p>
       <ul class="keys">
-        <li><span><kbd>Space</kbd><kbd>↑</kbd> or tap right half</span><span>Jump</span></li>
+        <li><span><kbd>Space</kbd><kbd>↑</kbd> or tap</span><span>Jump</span></li>
         <li><span>Hold jump</span><span>Jump higher</span></li>
-        <li><span><kbd>↓</kbd> or hold left half</span><span>Duck</span></li>
+        <li><span><kbd>↓</kbd> or hold ▼</span><span>Duck</span></li>
       </ul>
       <button class="go" id="btn-start" type="button">Start running</button>
     </section>
@@ -193,14 +216,19 @@ kbd {
       </dl>
       <p class="badge" id="over-new" hidden>New best!</p>
       <button class="go" id="btn-again" type="button">Run again</button>
-      <p class="hint">or press Space</p>
+      <p class="hint" id="hint-over">or press Space</p>
     </section>
 
     <section class="card" id="card-paused" hidden>
       <h2 class="cause calm">Paused</h2>
       <button class="go" id="btn-resume" type="button">Keep running</button>
-      <p class="hint">or press P</p>
+      <p class="hint" id="hint-paused">or press P</p>
     </section>
+  </div>
+
+  <div class="pads" id="pads" hidden>
+    <button class="pad" id="pad-duck" type="button" aria-label="Duck"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button class="pad jump" id="pad-jump" type="button" aria-label="Jump"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
   </div>
 </div>
 
@@ -445,7 +473,8 @@ kbd {
     const oldGround = groundY;
     W = cw / scale;
     H = ch / scale;
-    groundY = H - clamp(H * 0.16, 60, 300);
+    // On touch screens keep enough sand below the ground line for the buttons.
+    groundY = H - clamp(H * 0.16, matchMedia('(pointer: coarse)').matches ? 104 : 60, 300);
     monkeyX = clamp(W * 0.13, 70, 120);
     fg.width = canvas.width = Math.round(cw * dpr);
     fg.height = canvas.height = Math.round(ch * dpr);
@@ -465,7 +494,7 @@ kbd {
   let stateT = 0, clock = 0, speed = 0, dist = 0, bonus = 0, bananas = 0, shake = 0, heat = 0;
   let cause = 'stone', best = Number(store.get(BEST_KEY, 0)) || 0;
   let unlocked = { ape: false, arrow: false, lava: false }, milestone = 0, next = null, banner = null;
-  let touchMode = false;
+  let touchMode = matchMedia('(pointer: coarse)').matches;
   const things = [], parts = [], smoke = [], floaters = [];
   const monkey = { h: 0, vy: 0, onGround: true, phase: 0, squash: 0, rot: 0, spin: 0, flat: 0, dead: false, blinkT: 2, blink: 0, crouch: 0, ducking: false };
   const bow = { vis: 0, pull: 0, loaded: false, hold: 0 };
@@ -476,6 +505,8 @@ kbd {
   const score = () => Math.floor(dist / 36) + bonus;
 
   function showCard(name) {
+    $('hint-over').textContent = touchMode ? 'or tap anywhere' : 'or press Space';
+    $('hint-paused').textContent = touchMode ? 'or tap anywhere' : 'or press P';
     ui.overlay.hidden = !name;
     for (const [k, el] of Object.entries(ui.cards)) el.hidden = k !== name;
   }
@@ -538,7 +569,7 @@ kbd {
     if (isBest) { best = s; store.set(BEST_KEY, best); }
     const [title, sub] = CAUSES[cause];
     ui.overTitle.textContent = title;
-    ui.overSub.textContent = cause === 'arrow' && touchMode ? 'An arrow got you. Hold the left half to duck.' : sub;
+    ui.overSub.textContent = cause === 'arrow' && touchMode ? 'An arrow got you. Hold ▼ to duck.' : sub;
     ui.overScore.textContent = s;
     ui.overBest.textContent = best;
     ui.overBananas.textContent = bananas;
@@ -818,7 +849,7 @@ kbd {
     }
     if (!unlocked.arrow && s >= ARROW_AT) {
       unlocked.arrow = true;
-      showBanner(touchMode ? 'Arrows! Hold the left half to duck.' : 'Arrows! Press ↓ to duck.');
+      showBanner(touchMode ? 'Arrows! Hold ▼ to duck.' : 'Arrows! Press ↓ to duck.');
     }
     if (!unlocked.lava && s >= LAVA_AT) {
       unlocked.lava = true;
@@ -1681,6 +1712,7 @@ kbd {
   // ---------- hud ----------
   let shownScore = -1, shownBest = -1, shownBananas = -1;
   function updateHud() {
+    syncPads();
     const s = state === 'title' ? 0 : score();
     if (s !== shownScore) { shownScore = s; ui.score.textContent = pad(s); }
     if (best !== shownBest) { shownBest = best; ui.best.textContent = pad(best); }
@@ -1739,32 +1771,54 @@ kbd {
     else if (DOWN_KEYS.has(e.code)) input.down = false;
   });
 
-  // Touch: hold the left half to duck, tap the right half to jump (both thumbs at once is fine).
-  const pointers = new Map();
+  // Touch: tap anywhere to jump (hold for higher); the on-screen buttons add duck.
+  const pointers = new Set();
   game.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.icon-btn')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     touchMode = e.pointerType !== 'mouse';
-    if (touchMode && state === 'run' && e.clientX < game.clientWidth / 2) {
-      pointers.set(e.pointerId, 'duck');
-      input.down = true;
-    } else {
-      pointers.set(e.pointerId, 'jump');
-      press();
-    }
+    pointers.add(e.pointerId);
+    press();
   });
   const endPointer = (e) => {
-    const role = pointers.get(e.pointerId);
-    if (!role) return;
-    pointers.delete(e.pointerId);
-    const roles = [...pointers.values()];
-    if (role === 'duck') input.down = roles.includes('duck');
-    else if (!roles.includes('jump')) release();
+    if (!pointers.delete(e.pointerId)) return;
+    if (!pointers.size) release();
   };
   addEventListener('pointerup', endPointer);
   addEventListener('pointercancel', endPointer);
   game.addEventListener('contextmenu', (e) => e.preventDefault());
+  for (const type of ['touchend', 'click']) addEventListener(type, () => audio.unlock(), { passive: true });
+
+  // ---------- on-screen buttons (touch) ----------
+  let padsShown = false;
+  function syncPads() {
+    const show = touchMode && (state === 'run' || state === 'dying');
+    if (show === padsShown) return;
+    padsShown = show;
+    $('pads').hidden = !show;
+    game.classList.toggle('touch', show);
+  }
+  function bindPad(id, down, up) {
+    const el = $(id);
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      touchMode = true;
+      audio.unlock();
+      try { el.setPointerCapture(e.pointerId); } catch {}
+      el.classList.add('on');
+      down();
+    });
+    const end = () => {
+      if (!el.classList.contains('on')) return;
+      el.classList.remove('on');
+      if (up) up();
+    };
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(type, end);
+  }
+  bindPad('pad-jump', press, release);
+  bindPad('pad-duck', () => { input.down = true; }, () => { input.down = false; });
 
   // Assistive tech and keyboard "click" (detail 0) on the card buttons.
   for (const id of ['btn-start', 'btn-again', 'btn-resume']) {
