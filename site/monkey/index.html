@@ -141,6 +141,29 @@ kbd {
   background: var(--banana); border: 2px solid var(--ink); border-radius: 8px;
 }
 
+.music {
+  position: absolute; z-index: 4; width: 192px;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  display: grid; gap: 5px;
+  transition: width 0.35s ease, opacity 0.35s ease;
+}
+.music .frame {
+  aspect-ratio: 16 / 9; overflow: hidden; border-radius: 10px; background: #000;
+  border: 2px solid var(--ink); box-shadow: 0 4px 0 rgba(11, 42, 91, 0.35);
+}
+.music .frame iframe { display: block; width: 100%; height: 100%; border: 0; }
+.music p { margin: 0; font: 800 11px/1.3 var(--body); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
+.music p a { color: inherit; }
+/* While running the player shrinks to a corner tile and lets swipes pass through. */
+.music.mini { width: 112px; opacity: 0.55; pointer-events: none; }
+.music.mini p { display: none; }
+
+@media (max-width: 600px) {
+  .music { width: 160px; }
+  .music.mini { width: 88px; }
+  .overlay { padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
+}
 @media (max-height: 540px) {
   .overlay { padding-top: calc(60px + env(safe-area-inset-top, 0px)); }
   .card { gap: 10px; padding: 16px 18px 14px; }
@@ -210,6 +233,11 @@ kbd {
       <p class="hint" id="hint-paused">or press P</p>
     </section>
   </div>
+
+  <aside class="music" id="music" aria-label="Music">
+    <div class="frame"><div id="yt"></div></div>
+    <p>♪ <a href="https://www.youtube.com/watch?v=2eZVbrO6Z1M" target="_blank" rel="noopener">Monkeys Spinning Monkeys</a> by Kevin MacLeod (CC BY 4.0)</p>
+  </aside>
 </div>
 
 <script>
@@ -438,6 +466,37 @@ kbd {
     };
   })();
 
+  // ---------- music (YouTube embed) ----------
+  const music = (() => {
+    const VIDEO = '2eZVbrO6Z1M'; // Kevin MacLeod's own channel; embedding allowed
+    let player = null, ready = false, playing = false, vol = 40;
+    window.onYouTubeIframeAPIReady = () => {
+      player = new YT.Player('yt', {
+        videoId: VIDEO, width: '100%', height: '100%',
+        playerVars: { loop: 1, playlist: VIDEO, playsinline: 1, rel: 0, fs: 0, disablekb: 1, iv_load_policy: 3 },
+        events: {
+          onReady() { ready = true; sync(); },
+          onStateChange(e) { if (e.data === YT.PlayerState.ENDED) { player.seekTo(0); player.playVideo(); } },
+        },
+      });
+    };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.async = true;
+    document.head.append(tag);
+    function sync() {
+      if (!ready) return;
+      player.setVolume(vol);
+      if (playing && !audio.muted) { player.unMute(); player.playVideo(); }
+      else player.pauseVideo();
+    }
+    return {
+      sync,
+      play(v = 40) { playing = true; vol = v; sync(); },
+      stop() { playing = false; sync(); },
+    };
+  })();
+
   // ---------- view & projection ----------
   let W = 800, H = 440, scale = 1, dpr = 1;
   let feetY = 400, horizonY = 180, sM = 110, FOCAL = 374, camX = 0, camH = 2;
@@ -524,6 +583,7 @@ kbd {
     $('ico-pause').toggleAttribute('hidden', s === 'paused');
     $('ico-play').toggleAttribute('hidden', s !== 'paused');
     ui.pause.setAttribute('aria-label', s === 'paused' ? 'Resume' : 'Pause');
+    $('music').classList.toggle('mini', s === 'run' || s === 'dying');
   }
 
   function start() {
@@ -543,6 +603,7 @@ kbd {
     nextRowZ = 26;
     setState('run');
     showCard(null);
+    music.play();
     if (touchMode && !swipeTipShown) {
       swipeTipShown = true;
       showBanner('Swipe to change lanes · tap to jump');
@@ -552,12 +613,14 @@ kbd {
     if (state !== 'run') return;
     setState('paused');
     showCard('paused');
+    music.stop();
   }
   function resume() {
     if (state !== 'paused') return;
     setState('run');
     showCard(null);
     input.buffer = 0;
+    music.play();
   }
   function die(c, pullX) {
     cause = c;
@@ -595,6 +658,7 @@ kbd {
     setState('over');
     showCard('over');
     audio.over();
+    music.play(18);
   }
 
   // ---------- world building ----------
@@ -1947,6 +2011,7 @@ kbd {
   function toggleMute() {
     audio.unlock();
     audio.setMuted(!audio.muted);
+    music.sync();
     syncSound();
   }
 
@@ -1981,7 +2046,7 @@ kbd {
   // Touch: swipe left/right to change lane, up to jump, down to duck; tap to jump.
   const touches = new Map();
   game.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.icon-btn')) return;
+    if (e.target.closest('.icon-btn, .music')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     audio.unlock();
@@ -2024,7 +2089,7 @@ kbd {
   ui.sound.addEventListener('click', () => { toggleMute(); ui.sound.blur(); });
   ui.pause.addEventListener('click', () => { togglePause(); ui.pause.blur(); });
 
-  document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { pause(); music.stop(); } });
   addEventListener('blur', () => pause());
 
   // ---------- boot ----------
