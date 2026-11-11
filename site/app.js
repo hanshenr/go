@@ -461,6 +461,7 @@
 
   var Problems = {
     idx: 0, solved: new Set(ls.get('solved', [])), filtered: [],
+    shared: null, attempt: [], applying: false, // the problem both players in the room are looking at
     init: function () {
       var self = this;
       this.board = makeBoard($('board-problem'), { onPlay: function (i) { self.play(i); } });
@@ -617,17 +618,21 @@
       $('p-next').disabled = k === PROBLEMS.length - 1 || (this.filtered.length && this.filtered.indexOf(k) === this.filtered.length - 1);
       $('p-steps').hidden = true;
       $('p-controls').hidden = false;
+      this.attempt = [];
       this.markCurrent();
       this.render(false);
+      this.share();
     },
     toPlayColor: function () { return this.setup.toPlay; },
-    play: function (i) {
+    play: function (i, instant) {
       if (this.status !== 'solving') return;
       var st = this.state, size = st.size;
       if (st.toPlay !== this.toPlayColor()) return;
       var r = E.play(st, i % size, Math.floor(i / size));
-      if (!r.ok) { toast(illegalText(r.reason)); return; }
+      if (!r.ok) { if (!instant) toast(illegalText(r.reason)); return; }
       this.state = r.state;
+      this.attempt.push(i);
+      if (!instant) this.share();
       var sgf = E.pointToSgf(i, size);
       var child = (this.node.children || []).filter(function (n) { return n.m === sgf; })[0];
       if (!child) {
@@ -636,9 +641,9 @@
       }
       this.node = child;
       this.comment = child.c || '';
-      this.advance(child, null);
+      this.advance(child, null, instant);
     },
-    advance: function (playerNode, parentOk) {
+    advance: function (playerNode, parentOk, instant) {
       var self = this;
       var kids = playerNode.children || [];
       if (!kids.length) {
@@ -647,8 +652,8 @@
         return;
       }
       this.status = 'waiting';
-      this.render(true);
-      this.timer = setTimeout(function () {
+      if (!instant) this.render(true);
+      var respond = function () {
         var resp = kids[0];
         var st = self.state, size = st.size;
         if (!resp.m || resp.m === 'tt' || (size <= 19 && resp.m === '')) st = E.pass(st);
@@ -670,8 +675,9 @@
           return;
         }
         self.status = 'solving';
-        self.render(true);
-      }, 420);
+        if (!instant) self.render(true);
+      };
+      if (instant) respond(); else this.timer = setTimeout(respond, 420);
     },
     finish: function (verdict, comment) {
       this.status = verdict;
@@ -682,7 +688,7 @@
         this.renderList();
         this.markCurrent();
       }
-      this.render(true);
+      if (!this.applying) this.render(true);
     },
     mainLine: function () {
       // At player levels prefer a child whose subtree reaches ok; opponent levels take the first child.
@@ -723,10 +729,37 @@
       $('p-step-back').disabled = this.solPos === 0;
       $('p-step-fwd').disabled = this.solPos >= this.line.length;
       this.render(d !== 0);
+      this.share();
+    },
+    // ---- shared with the other player in the room: problem, the moves tried, the solution view
+    share: function () {
+      if (this.applying || !this.p) return;
+      this.shared = { v: (this.shared ? this.shared.v : 0) + 1, ts: Date.now(), by: me.id, k: this.idx,
+        moves: this.attempt.slice(), sol: this.status === 'solution' ? this.solPos : -1 };
+      Room.send({ t: 'prob', prob: this.shared });
+    },
+    receive: function (r) {
+      if (!r || typeof r !== 'object' || typeof r.v !== 'number' || !PROBLEMS[r.k] || !Array.isArray(r.moves)) return;
+      if (!newerGame(r, this.shared)) return;
+      var sameProblem = this.p && r.k === this.idx, before = this.attempt.length;
+      this.shared = r;
+      this.applying = true;
+      try {
+        this.load(r.k);
+        var self = this;
+        r.moves.forEach(function (i) { if (typeof i === 'number') self.play(i, true); });
+        if (typeof r.sol === 'number' && r.sol >= 0) { this.showSolution(); this.solPos = 0; this.solStep(r.sol); }
+      } finally { this.applying = false; }
+      this.render(sameProblem && r.moves.length > before);
+      var who = Room.opponent ? Room.opponent.name : 'Your partner';
+      if (activeTab !== 'problems' && !sameProblem) toast(who + ' opened Problem ' + this.p.id + ' \u2014 open Problems to solve it together');
     },
     render: function (animate) {
       var st = this.state, self = this;
       var solving = this.status === 'solving';
+      var eb = clear($('p-eyebrow'));
+      eb.appendChild(document.createTextNode('Problem ' + this.p.id + (this.p.level ? ' \u00b7 ' + cap(this.p.level) : '')));
+      if (Room.state === 'connected' && Room.opponent) eb.appendChild(h('span', { class: 'together', text: ' \u00b7 together with ' + Room.opponent.name }));
       this.board.render({
         board: st.board, size: st.size, crop: this.crop, lastMove: this.status === 'solution' ? -1 : st.lastMove,
         mode: solving ? 'play' : 'none', ghostColor: this.toPlayColor(),
@@ -801,7 +834,7 @@
       setInterval(function () { self.heartbeat(); }, 4000);
       this.claim(0);
     },
-    emit: function () { Play.render(); },
+    emit: function () { Play.render(); if (Problems.p) Problems.render(false); },
     fail: function (why) {
       if (this.state === 'failed') return;
       this.state = 'failed';
@@ -870,7 +903,7 @@
       c.on('open', function () {
         if (self.conn !== c) return;
         self.lastSeen = Date.now();
-        self.send({ t: 'hello', user: me, game: Play.game });
+        self.send({ t: 'hello', user: me, game: Play.game, prob: Problems.shared });
       });
       c.on('data', function (m) {
         if (self.conn !== c || !m || typeof m !== 'object') return;
@@ -880,6 +913,7 @@
           self.state = 'connected';
         }
         if (m.game) Play.receive(m.game, m.t === 'game');
+        if (m.prob) Problems.receive(m.prob);
         if (m.t === 'hello' || m.t === 'name') { Play.seatCheck(); self.emit(); }
       });
       var gone = function () {

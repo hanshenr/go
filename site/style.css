@@ -426,3 +426,5 @@ input[type="checkbox"] { accent-color: var(--ink); }
   border-radius: var(--radius);
 }
 #rv-live { align-self: flex-start; }
+
+.eyebrow .together { color: var(--accent); }
