@@ -804,15 +804,45 @@
     b.hidden = false;
   }
 
+  // Who this tab is. Each open tab is its own player, so two tabs (or windows) of the same
+  // browser can play each other on one laptop. The first tab keeps the browser's saved identity
+  // (so a reload or a later visit keeps your seat); any other tab open at the same time gets a
+  // fresh one. A tab holds its identity with a heartbeat lock in localStorage, released on unload.
+  var saveMyName;
   var me = (function () {
-    var id = ls.get('me.id', null);
-    if (!id || !/^[a-z0-9]{8,24}$/.test(id)) {
+    var ss = {
+      get: function (k) { try { return sessionStorage.getItem('go.' + k); } catch (e) { return null; } },
+      set: function (k, v) { try { sessionStorage.setItem('go.' + k, v); } catch (e) { /* storage blocked */ } }
+    };
+    var valid = function (id) { return typeof id === 'string' && /^[a-z0-9]{8,24}$/.test(id); };
+    var tab = Math.random().toString(36).slice(2);
+    var free = function (id) {
+      var l = ls.get('lock.' + id, null);
+      return !l || l.tab === tab || Date.now() - l.ts > 5000;
+    };
+    var mainId = ls.get('me.id', null);
+    if (!valid(mainId)) mainId = null;
+    var id = [ss.get('me.id'), mainId].filter(function (c) { return valid(c) && free(c); })[0];
+    if (!id) {
       id = (Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8)).replace(/[^a-z0-9]/g, '');
-      ls.set('me.id', id);
+      if (!mainId) { mainId = id; ls.set('me.id', id); }
     }
-    var name = ls.get('me.name', null);
-    if (!name) { name = 'Guest ' + (1000 + Math.floor(Math.random() * 9000)); ls.set('me.name', name); }
-    return { id: id, name: name };
+    ss.set('me.id', id);
+    var isMain = id === mainId;
+    var claim = function () { ls.set('lock.' + id, { tab: tab, ts: Date.now() }); };
+    claim();
+    setInterval(claim, 2000);
+    window.addEventListener('pagehide', function () {
+      var l = ls.get('lock.' + id, null);
+      if (l && l.tab === tab) { try { localStorage.removeItem('go.lock.' + id); } catch (e) { /* ignore */ } }
+    });
+    window.addEventListener('pageshow', function (e) { if (e.persisted) claim(); });
+
+    var name = isMain ? ls.get('me.name', null) : ss.get('me.name');
+    if (!name) name = 'Guest ' + (1000 + Math.floor(Math.random() * 9000));
+    saveMyName = function (v) { if (isMain) ls.set('me.name', v); else ss.set('me.name', v); };
+    saveMyName(name);
+    return { id: id, name: name }; // plain data: it is sent to the other player as-is
   })();
 
   function cleanUser(u) {
@@ -979,7 +1009,7 @@
         if (!v) { input.value = me.name; return; }
         if (v === me.name) return;
         me.name = v;
-        ls.set('me.name', v);
+        saveMyName(v);
         Room.send({ t: 'name', user: me });
         if (self.game && self.seatOf(me.id)) self.commit(function (g) { g.players[self.seatOf(me.id)].name = v; });
         else self.render();
