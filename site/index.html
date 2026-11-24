@@ -12,11 +12,11 @@
 </head>
 <body>
   <header class="top">
-    <div class="brand">
+    <a class="brand" href="./" title="Home: your games">
       <span class="brand-mark" aria-hidden="true"></span>
       <h1>Go</h1>
       <span class="brand-sub" lang="ja">囲碁</span>
-    </div>
+    </a>
     <nav class="tabs" role="tablist" aria-label="Mode">
       <button role="tab" id="tab-play" data-tab="play" aria-controls="view-play">Play</button>
       <button role="tab" id="tab-problems" data-tab="problems" aria-controls="view-problems">Problems</button>
@@ -30,11 +30,31 @@
   <div id="banner" class="banner" hidden></div>
 
   <main>
+    <!-- Home: start a game, join one, or go back to one of yours -->
+    <section id="view-home" class="view home" aria-labelledby="tab-play" hidden>
+      <div class="home-wrap">
+        <h2>Play Go with a friend</h2>
+        <p class="muted">Start a game, send your friend the link, and you're connected. No sign-in.</p>
+        <button class="btn primary big" id="home-new">Start a new game</button>
+        <form id="home-join" class="home-join" autocomplete="off">
+          <input type="text" id="home-code" placeholder="Paste an invite link or room code" aria-label="Invite link or room code">
+          <button class="btn">Join</button>
+        </form>
+        <h3>Your games</h3>
+        <ol id="home-rooms" class="home-rooms"></ol>
+      </div>
+    </section>
+
     <!-- Play: one shared game between two people -->
     <section id="view-play" class="view" role="tabpanel" aria-labelledby="tab-play" hidden>
       <div class="play-layout">
         <div class="stage"><div class="board-host" id="board-play"></div></div>
         <aside class="side">
+          <div class="room-bar">
+            <a class="btn small ghost" href="./">&larr; All games</a>
+            <button type="button" class="btn small" id="copy-link">Copy invite link</button>
+            <span class="muted small">Room <span id="room-code"></span></span>
+          </div>
           <p class="conn small" id="conn"></p>
           <div class="notice-inline" id="offline" hidden></div>
           <div class="game-head">
@@ -103,7 +123,7 @@
           <label class="name-field"><span class="label">Your name</span>
             <input type="text" id="my-name" maxlength="40" autocomplete="nickname" spellcheck="false">
           </label>
-          <p class="hint muted small">Both of you open this same page and you're connected automatically. Keys: <kbd>P</kbd> pass, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> review</p>
+          <p class="hint muted small">Send your friend the invite link; you're connected as soon as they open it. Keys: <kbd>P</kbd> pass, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> review</p>
         </aside>
       </div>
     </section>

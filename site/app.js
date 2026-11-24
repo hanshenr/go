@@ -785,6 +785,12 @@
         size: s.size, color: s.toPlay === 2 ? 'W' : 'B', handicap: 0, setup: { black: s.black.slice(), white: s.white.slice() },
         toPlay: s.toPlay, title: 'Problem ' + this.p.id
       });
+      if (HOME) {
+        var code = newRoomCode();
+        ls.set('game.' + code, Play.game);
+        location.href = roomHref(code);
+        return;
+      }
       toast('New game from Problem ' + this.p.id + ' \u2014 you play ' + colorName(s.toPlay));
     }
   };
@@ -795,7 +801,14 @@
   // finds A taken, takes B and dials A. If A vanishes, B tries to become A itself.
 
   var PUBLIC_URL = 'https://hanshenr.github.io/go/';
-  var ROOM = (PARAMS.get('room') || '7f3k').replace(/[^a-z0-9]/gi, '').slice(0, 16) || '7f3k';
+  // No ?room= in the URL means the home page (start / join / your games); a room is one game link.
+  var ROOM = (PARAMS.get('room') || '').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 16);
+  var HOME = !ROOM;
+  var GAME_KEY = 'game.' + ROOM; // each room keeps its own saved game
+  try { localStorage.removeItem('go.game'); } catch (e) { /* old single shared save */ }
+  function newRoomCode() { var c = ''; while (c.length < 6) c += Math.random().toString(36).slice(2); return c.slice(0, 6); }
+  function roomHref(code) { return location.pathname + '?room=' + code; }
+  function roomUrl(code) { return location.origin + location.pathname + '?room=' + code; }
   var PEER_IDS = ['hanshenr-go-' + ROOM + '-a', 'hanshenr-go-' + ROOM + '-b'];
 
   function showBanner(text) {
@@ -1009,8 +1022,9 @@
         if (hc < 2 && f.komi.value === '0.5') f.komi.value = '6.5';
       });
       this.wireReview();
-      var saved = ls.get('game', null);
+      var saved = HOME ? null : ls.get(GAME_KEY, null);
       if (validGame(saved)) this.game = saved;
+      if (!HOME) rememberRoom(this.game);
       $('new-game').addEventListener('submit', function (e) { e.preventDefault(); });
       $('new-game-btn').addEventListener('click', function () { self.newFromForm(); });
       var input = $('my-name');
@@ -1030,6 +1044,11 @@
       this.render();
     },
 
+    save: function (g) {
+      if (HOME) return;
+      ls.set(GAME_KEY, g);
+      rememberRoom(g);
+    },
     seatOf: function (id, g) {
       g = g || this.game;
       if (!g) return 0;
@@ -1050,7 +1069,7 @@
       if (newerGame(g, this.game)) {
         var prevId = this.game && this.game.id;
         this.game = g;
-        ls.set('game', g);
+        Play.save(g);
         if (g.id !== prevId) { this.board.prevBoard = null; this.view = null; }
         this.seatCheck();
         this.render();
@@ -1081,7 +1100,7 @@
       g.ts = Date.now();
       g.by = me.id;
       this.game = g;
-      ls.set('game', g);
+      Play.save(g);
       Room.send({ t: 'game', game: g });
       this.render();
     },
@@ -1103,7 +1122,7 @@
       this.game = g;
       this.view = null;
       this.board.prevBoard = null;
-      ls.set('game', g);
+      Play.save(g);
       Room.send({ t: 'game', game: g });
       selectTab('play');
       this.render();
@@ -1423,6 +1442,66 @@
 
   // ------------------------------------------------------------------ tabs, keys, boot
 
+  // ------------------------------------------------------------------ home: start / join / your games
+  function rememberRoom(g) {
+    if (HOME) return;
+    var list = ls.get('rooms', []);
+    if (!Array.isArray(list)) list = [];
+    var old = list.filter(function (r) { return r && r.room === ROOM; })[0] || {};
+    var opp = g && [g.players[1], g.players[2]].filter(function (p) { return p && p.id !== me.id; })[0];
+    var entry = {
+      room: ROOM, ts: Date.now(),
+      opp: (Room.opponent && Room.opponent.name) || (opp && opp.name) || old.opp || '',
+      size: g ? g.size : old.size || 0,
+      moves: g ? g.moves.filter(function (m) { return !m.resign; }).length : old.moves || 0
+    };
+    list = [entry].concat(list.filter(function (r) { return r && r.room !== ROOM; })).slice(0, 12);
+    ls.set('rooms', list);
+  }
+  function ago(ts) {
+    var m = Math.round((Date.now() - ts) / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + ' min ago';
+    if (m < 60 * 24) return Math.round(m / 60) + ' h ago';
+    return Math.round(m / 1440) + ' d ago';
+  }
+  var Home = {
+    init: function () {
+      if (!HOME) {
+        $('copy-link').addEventListener('click', function () {
+          var url = roomUrl(ROOM);
+          var done = function () { toast('Invite link copied \u2014 send it to your friend'); };
+          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { prompt('Copy this link:', url); });
+          else prompt('Copy this link:', url);
+        });
+        $('room-code').textContent = ROOM;
+        return;
+      }
+      $('home-new').addEventListener('click', function () { location.href = roomHref(newRoomCode()); });
+      $('home-join').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var v = $('home-code').value.trim();
+        var m = v.match(/[?&]room=([a-z0-9]+)/i);
+        var code = (m ? m[1] : v).replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 16);
+        if (code) location.href = roomHref(code);
+        else $('home-code').focus();
+      });
+    },
+    render: function () {
+      var ol = clear($('home-rooms'));
+      var list = ls.get('rooms', []);
+      if (!Array.isArray(list) || !list.length) { ol.appendChild(h('li', { class: 'muted empty', text: 'No games yet. Start one above.' })); return; }
+      list.forEach(function (r) {
+        var meta = [r.size ? r.size + '\u00d7' + r.size : 'No game started', r.size ? 'move ' + (r.moves || 0) : null, ago(r.ts)].filter(Boolean).join(' \u00b7 ');
+        ol.appendChild(h('li', {}, [h('a', { href: roomHref(r.room) }, [
+          h('span', { class: 'hr-who', text: r.opp ? 'vs ' + r.opp : 'Waiting for a friend' }),
+          h('span', { class: 'hr-meta muted small', text: meta }),
+          h('span', { class: 'hr-code muted small', text: r.room })
+        ])]));
+      });
+    }
+  };
+
   var activeTab = null;
   var TABS = ['play', 'problems'];
   function selectTab(name) {
@@ -1434,6 +1513,7 @@
       b.tabIndex = on ? 0 : -1;
     });
     TABS.forEach(function (t) { $('view-' + t).hidden = t !== name; });
+    if (HOME) { $('view-play').hidden = true; $('view-home').hidden = name !== 'play'; if (name === 'play') Home.render(); }
     if (name === 'problems') Problems.markCurrent();
     updateYourMove();
   }
@@ -1483,8 +1563,9 @@
 
   Play.init();
   Problems.init();
+  Home.init();
   selectTab(ls.get('tab', 'play') === 'problems' ? 'problems' : 'play');
-  Room.start();
+  if (!HOME) Room.start();
 
   // Small hook for debugging and tests.
   window.GoApp = { Play: Play, Problems: Problems, Room: Room, me: me };
