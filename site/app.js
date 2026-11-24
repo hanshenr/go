@@ -804,46 +804,45 @@
     b.hidden = false;
   }
 
-  // Who this tab is. Each open tab is its own player, so two tabs (or windows) of the same
-  // browser can play each other on one laptop. The first tab keeps the browser's saved identity
-  // (so a reload or a later visit keeps your seat); any other tab open at the same time gets a
-  // fresh one. A tab holds its identity with a heartbeat lock in localStorage, released on unload.
-  var saveMyName;
+  // Who you are: one identity (id + the name you chose) for the whole browser, shared by all tabs.
+  // The one exception is two of your own tabs connected to each other in the same room (playing
+  // yourself on one laptop): then the newer tab becomes a second, tab-only player ("twin").
+  var ss = {
+    get: function (k) { try { return sessionStorage.getItem('go.' + k); } catch (e) { return null; } },
+    set: function (k, v) { try { sessionStorage.setItem('go.' + k, v); } catch (e) { /* storage blocked */ } }
+  };
+  function newId() {
+    return (Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8)).replace(/[^a-z0-9]/g, '');
+  }
+  function guestName() { return 'Guest ' + (1000 + Math.floor(Math.random() * 9000)); }
+  var validId = function (id) { return typeof id === 'string' && /^[a-z0-9]{8,24}$/.test(id); };
+  var BORN = Number(ss.get('born')) || Date.now(); // when this tab first opened (survives reloads)
+  ss.set('born', String(BORN));
+  var isTwin = false;
   var me = (function () {
-    var ss = {
-      get: function (k) { try { return sessionStorage.getItem('go.' + k); } catch (e) { return null; } },
-      set: function (k, v) { try { sessionStorage.setItem('go.' + k, v); } catch (e) { /* storage blocked */ } }
-    };
-    var valid = function (id) { return typeof id === 'string' && /^[a-z0-9]{8,24}$/.test(id); };
-    var tab = Math.random().toString(36).slice(2);
-    var free = function (id) {
-      var l = ls.get('lock.' + id, null);
-      return !l || l.tab === tab || Date.now() - l.ts > 5000;
-    };
-    var mainId = ls.get('me.id', null);
-    if (!valid(mainId)) mainId = null;
-    var id = [ss.get('me.id'), mainId].filter(function (c) { return valid(c) && free(c); })[0];
-    if (!id) {
-      id = (Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8)).replace(/[^a-z0-9]/g, '');
-      if (!mainId) { mainId = id; ls.set('me.id', id); }
-    }
-    ss.set('me.id', id);
-    var isMain = id === mainId;
-    var claim = function () { ls.set('lock.' + id, { tab: tab, ts: Date.now() }); };
-    claim();
-    setInterval(claim, 2000);
-    window.addEventListener('pagehide', function () {
-      var l = ls.get('lock.' + id, null);
-      if (l && l.tab === tab) { try { localStorage.removeItem('go.lock.' + id); } catch (e) { /* ignore */ } }
-    });
-    window.addEventListener('pageshow', function (e) { if (e.persisted) claim(); });
-
-    var name = isMain ? ls.get('me.name', null) : ss.get('me.name');
-    if (!name) name = 'Guest ' + (1000 + Math.floor(Math.random() * 9000));
-    saveMyName = function (v) { if (isMain) ls.set('me.name', v); else ss.set('me.name', v); };
-    saveMyName(name);
+    try { // tidy up keys from the short-lived per-tab version
+      Object.keys(localStorage).forEach(function (k) { if (/^go\.lock\./.test(k)) localStorage.removeItem(k); });
+    } catch (e) { /* ignore */ }
+    var id = ls.get('me.id', null);
+    if (!validId(id)) { id = newId(); ls.set('me.id', id); }
+    var name = ls.get('me.name', null);
+    if (!name) { name = guestName(); ls.set('me.name', name); }
+    var twin = ss.get('twin.id');
+    if (validId(twin) && twin !== id) { isTwin = true; return { id: twin, name: ss.get('twin.name') || guestName() }; }
     return { id: id, name: name }; // plain data: it is sent to the other player as-is
   })();
+  function saveMyName(v) { if (isTwin) ss.set('twin.name', v); else ls.set('me.name', v); }
+  // Called when this tab meets another tab of the same browser: become a separate player.
+  function becomeTwin() {
+    var id = ss.get('twin.id');
+    if (!validId(id) || id === me.id || id === ls.get('me.id', null)) { id = newId(); ss.set('twin.id', id); }
+    me.id = id;
+    me.name = ss.get('twin.name') || guestName();
+    isTwin = true;
+    saveMyName(me.name);
+    var input = document.getElementById('my-name');
+    if (input) input.value = me.name;
+  }
 
   function cleanUser(u) {
     if (!u || typeof u.id !== 'string') return null;
@@ -933,18 +932,30 @@
       c.on('open', function () {
         if (self.conn !== c) return;
         self.lastSeen = Date.now();
-        self.send({ t: 'hello', user: me, game: Play.game, prob: Problems.shared });
+        self.send({ t: 'hello', user: me, born: BORN, game: Play.game, prob: Problems.shared });
       });
       c.on('data', function (m) {
         if (self.conn !== c || !m || typeof m !== 'object') return;
         self.lastSeen = Date.now();
-        if (m.t === 'hello' || m.t === 'name') {
-          self.opponent = cleanUser(m.user);
+        var who = (m.t === 'hello' || m.t === 'name') ? cleanUser(m.user) : null;
+        // Another tab of this same browser: the newer tab (ties: the dialer) becomes a separate player.
+        var twin = !!(who && who.id === me.id);
+        var fork = twin && m.t === 'hello' && ((Number(m.born) || 0) < BORN || (Number(m.born) === BORN && self.role === 'b'));
+        if (twin) c._twin = true;
+        if (who && !twin) {
+          self.opponent = who;
           self.state = 'connected';
         }
         if (m.game) Play.receive(m.game, m.t === 'game');
         if (m.prob) Problems.receive(m.prob);
-        if (m.t === 'hello' || m.t === 'name') { Play.seatCheck(); self.emit(); }
+        if (fork) {
+          becomeTwin();
+          self.send({ t: 'hello', user: me, born: BORN, game: Play.game, prob: Problems.shared });
+        } else if (who && !twin && m.t === 'hello' && c._twin) {
+          c._twin = false;
+          self.send({ t: 'name', user: me }); // the other tab just split off: introduce ourselves again
+        }
+        if (who && !twin) { Play.seatCheck(); self.emit(); }
       });
       var gone = function () {
         if (self.conn !== c) return;
