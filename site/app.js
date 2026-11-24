@@ -1108,7 +1108,7 @@
     newGame: function (opts) {
       var color = opts.color === 'R' ? (Math.random() < 0.5 ? 1 : 2) : opts.color === 'W' ? 2 : 1;
       var prev = this.game;
-      var other = Room.opponent || (prev && [prev.players[1], prev.players[2]].filter(function (p) { return p && p.id !== me.id; })[0]) || null;
+      var other = Room.opponent || null; // only someone actually connected; otherwise the seat waits for whoever joins
       var players = {};
       players[color] = { id: me.id, name: me.name };
       players[3 - color] = other ? { id: other.id, name: other.name } : null;
